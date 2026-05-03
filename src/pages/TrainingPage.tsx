@@ -1,168 +1,35 @@
-import { useState, useEffect, useRef } from 'react'
-import { QrCode, ScanLine, CheckCircle, Plus, Users, ClipboardList } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { QrCode, CheckCircle, Plus, Users, ClipboardList, MapPin, Navigation } from 'lucide-react'
 import { trainingsService } from '../services/api'
 import { useAuth } from '../hooks/useAuth'
 import { Avatar, Modal, Input, toast, EmptyState, Spinner } from '../components/UI'
 import type { Training, TrainingInterest, CheckIn } from '../types'
 
-// ── QR Code renderer (pure canvas, no library needed) ──────────
-function QRDisplay({ value }: { value: string }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  useEffect(() => {
-    // We show a styled placeholder — real QR needs qrcode.js
-    // In production, install: npm i qrcode && import QRCode from 'qrcode'
-    // QRCode.toCanvas(canvasRef.current, value, { width: 200, color: { dark: '#0A0A0A', light: '#FFFFFF' } })
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.fillStyle = 'white'
-    ctx.fillRect(0, 0, 200, 200)
-    // Draw placeholder grid
-    ctx.fillStyle = '#0A0A0A'
-    const cell = 200 / 21
-    const pattern = [
-      [0,0,6],[0,14,6],[14,0,6]  // corner squares
-    ]
-    pattern.forEach(([r, c, size]) => {
-      ctx.fillRect(c * cell, r * cell, size * cell, size * cell)
-      ctx.fillStyle = 'white'
-      ctx.fillRect((c+1) * cell, (r+1) * cell, (size-2) * cell, (size-2) * cell)
-      ctx.fillStyle = '#0A0A0A'
-      ctx.fillRect((c+2) * cell, (r+2) * cell, (size-4) * cell, (size-4) * cell)
-      ctx.fillStyle = '#0A0A0A'
-    })
-    // Random data modules
-    const hash = value.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
-    for (let r = 0; r < 21; r++) {
-      for (let c = 0; c < 21; c++) {
-        if ((r < 8 && c < 8) || (r < 8 && c > 12) || (r > 12 && c < 8)) continue
-        if ((hash * (r + 1) * (c + 1)) % 3 === 0) {
-          ctx.fillRect(c * cell, r * cell, cell - 0.5, cell - 0.5)
-        }
-      }
-    }
-  }, [value])
-
-  return (
-    <div style={{ background: 'white', padding: 16, borderRadius: 12, border: '2px solid var(--gray-200)', display: 'inline-block' }}>
-      <canvas ref={canvasRef} width={200} height={200} style={{ display: 'block' }} />
-    </div>
-  )
+// ── Calcula distância entre dois pontos em metros ────────────
+function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-// ── QR Scanner (uses device camera via MediaDevices API) ────────
-function QRScanner({ onScan, onClose }: { onScan: (data: string) => void; onClose: () => void }) {
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const [error, setError] = useState('')
-  const [scanning, setScanning] = useState(false)
-
-  useEffect(() => {
-    let stream: MediaStream | null = null
-    let animationId: number
-
-    const startCamera = async () => {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: 1280, height: 720 }
-        })
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          await videoRef.current.play()
-          setScanning(true)
-          scanFrame()
-        }
-      } catch {
-        setError('Não foi possível acessar a câmera. Verifique as permissões do navegador.')
-      }
-    }
-
-    const scanFrame = async () => {
-      if (!videoRef.current || videoRef.current.readyState < 2) {
-        animationId = requestAnimationFrame(scanFrame)
-        return
-      }
-
-      // Tenta BarcodeDetector (Chrome Android)
-      if ('BarcodeDetector' in window) {
-        try {
-          const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] })
-          const codes = await detector.detect(videoRef.current)
-          if (codes.length > 0) {
-            onScan(codes[0].rawValue)
-            return
-          }
-        } catch { }
-      } else {
-        // Fallback: canvas + jsQR
-        try {
-          const canvas = document.createElement('canvas')
-          canvas.width = videoRef.current.videoWidth
-          canvas.height = videoRef.current.videoHeight
-          const ctx = canvas.getContext('2d')
-          if (ctx && canvas.width > 0) {
-            ctx.drawImage(videoRef.current, 0, 0)
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-            const jsQR = (await import('jsqr')).default
-            const code = jsQR(imageData.data, imageData.width, imageData.height)
-console.log('scanning...', code)
-if (code) {
-  onScan(code.data)
-  return
+// ── Verifica se está no horário permitido ────────────────────
+function isCheckinTime(start: string, end: string): boolean {
+  const now = new Date()
+  const [sh, sm] = start.split(':').map(Number)
+  const [eh, em] = end.split(':').map(Number)
+  const startMin = sh * 60 + sm
+  const endMin = eh * 60 + em
+  const nowMin = now.getHours() * 60 + now.getMinutes()
+  return nowMin >= startMin && nowMin <= endMin
 }
-          }
-        } catch { }
-      }
 
-      animationId = requestAnimationFrame(scanFrame)
-    }
-
-    startCamera()
-
-    return () => {
-      cancelAnimationFrame(animationId)
-      stream?.getTracks().forEach(t => t.stop())
-    }
-  }, [onScan])
-
-  return (
-    <div style={{
-      position: 'fixed', inset: 0,
-      background: 'black', zIndex: 60,
-      display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center'
-    }}>
-      {error ? (
-        <div style={{ color: 'white', textAlign: 'center', padding: 32 }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>📷</div>
-          <p style={{ lineHeight: 1.5, marginBottom: 20 }}>{error}</p>
-          <button className="btn btn-secondary" style={{ width: 'auto' }} onClick={onClose}>Fechar</button>
-        </div>
-      ) : (
-        <>
-          <video ref={videoRef} playsInline muted style={{ width: '100%', maxWidth: 400, borderRadius: 12 }} />
-          {scanning && (
-            <div style={{
-              position: 'absolute', width: 250, height: 250,
-              border: '3px solid var(--orange)', borderRadius: 20,
-              boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)'
-            }} />
-          )}
-          <p style={{ color: 'white', marginTop: 20, fontSize: 14, textAlign: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
-            Aponte para o QR Code do treino
-          </p>
-          <button onClick={onClose} style={{
-            marginTop: 16, background: 'rgba(255,255,255,0.2)',
-            border: 'none', color: 'white', padding: '10px 24px',
-            borderRadius: 999, cursor: 'pointer', fontSize: 14,
-            fontWeight: 700, position: 'relative', zIndex: 1
-          }}>
-            Cancelar
-          </button>
-        </>
-      )}
-    </div>
-  )
+// ── Verifica se é sábado ─────────────────────────────────────
+function isSaturday(): boolean {
+  return new Date().getDay() === 6
 }
 
 export default function TrainingPage() {
@@ -172,11 +39,26 @@ export default function TrainingPage() {
   const [checkIns, setCheckIns] = useState<CheckIn[]>([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<'interest' | 'checkin'>('interest')
-  const [showQR, setShowQR] = useState(false)
-  const [showScanner, setShowScanner] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ title: 'Treino Mover', date: '', location: '', open_at: '', close_at: '' })
+  const [showLocation, setShowLocation] = useState(false)
+  const [checkingIn, setCheckingIn] = useState(false)
+  const [form, setForm] = useState({
+    title: 'Treino Mover',
+    date: '',
+    location: '',
+    checkin_start: '06:30',
+    checkin_end: '10:00',
+    checkin_radius: '300',
+  })
+  const [locationForm, setLocationForm] = useState({
+    checkin_lat: '',
+    checkin_lng: '',
+    checkin_radius: '300',
+    checkin_start: '06:30',
+    checkin_end: '10:00',
+  })
   const [saving, setSaving] = useState(false)
+  const [gettingLocation, setGettingLocation] = useState(false)
 
   const myInterest = interested.some(i => i.user_id === user?.id)
   const myCheckIn = checkIns.find(c => c.user_id === user?.id)
@@ -185,7 +67,21 @@ export default function TrainingPage() {
     ? new Date() >= new Date(training.open_at) && new Date() <= new Date(training.close_at)
     : false
 
-  const load = async () => {
+  // Verifica se check-in por geo está disponível
+  const canGeoCheckIn = training
+    && training.checkin_lat
+    && training.checkin_lng
+    && isCheckinTime(training.checkin_start || '06:30', training.checkin_end || '10:00')
+    && isSaturday()
+    && !myCheckIn
+
+  // Para teste: ignora restrição de sábado e horário
+  const canGeoCheckInTest = training
+    && training.checkin_lat
+    && training.checkin_lng
+    && !myCheckIn
+
+  const load = useCallback(async () => {
     try {
       const t = await trainingsService.getNext()
       setTraining(t)
@@ -194,13 +90,23 @@ export default function TrainingPage() {
           trainingsService.getInterested(t.id),
           trainingsService.getCheckIns(t.id),
         ])
-        setInterested(int); setCheckIns(cks)
+        setInterested(int)
+        setCheckIns(cks)
+        if (t.checkin_lat) {
+          setLocationForm({
+            checkin_lat: String(t.checkin_lat),
+            checkin_lng: String(t.checkin_lng || ''),
+            checkin_radius: String(t.checkin_radius || 300),
+            checkin_start: t.checkin_start || '06:30',
+            checkin_end: t.checkin_end || '10:00',
+          })
+        }
       }
     } catch { toast.error('Erro ao carregar treino') }
     finally { setLoading(false) }
-  }
+  }, [])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
   const handleToggle = async () => {
     if (!training) return
@@ -209,50 +115,141 @@ export default function TrainingPage() {
     load()
   }
 
-  const handleScan = async (data: string) => {
-    setShowScanner(false)
-    try {
-      const parsed = JSON.parse(data)
-      if (parsed.type !== 'mover_checkin') { toast.error('QR inválido'); return }
-      const result = await trainingsService.checkIn(parsed.training_id, user!.id)
-      toast.success(result.alreadyCheckedIn ? 'Você já fez check-in! 🎉' : 'Check-in realizado! 🏃')
-      load()
-    } catch { toast.error('QR inválido ou expirado') }
+  // ── Check-in por geolocalização ──────────────────────────
+  const handleGeoCheckIn = async () => {
+    if (!training) return
+    setCheckingIn(true)
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords
+        const distance = getDistance(
+          latitude, longitude,
+          training.checkin_lat!, training.checkin_lng!
+        )
+        const radius = training.checkin_radius || 300
+
+        if (distance <= radius) {
+          const result = await trainingsService.checkIn(training.id, user!.id)
+          if (result.alreadyCheckedIn) {
+            toast.show('Você já fez check-in! 🎉')
+          } else {
+            toast.success('Check-in realizado! 🏃 Bom treino!')
+          }
+          load()
+        } else {
+          toast.error(`Você está a ${Math.round(distance)}m do local. Máximo: ${radius}m`)
+        }
+        setCheckingIn(false)
+      },
+      (err) => {
+        if (err.code === 1) {
+          toast.error('Permita o acesso à localização nas configurações do navegador.')
+        } else {
+          toast.error('Não foi possível obter sua localização. Tente novamente.')
+        }
+        setCheckingIn(false)
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    )
   }
 
+  // ── Admin: usar localização atual ────────────────────────
+  const handleUseCurrentLocation = () => {
+    setGettingLocation(true)
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocationForm(f => ({
+          ...f,
+          checkin_lat: String(position.coords.latitude),
+          checkin_lng: String(position.coords.longitude),
+        }))
+        toast.success('Localização obtida!')
+        setGettingLocation(false)
+      },
+      () => {
+        toast.error('Não foi possível obter a localização.')
+        setGettingLocation(false)
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
+  // ── Admin: salvar configuração de check-in ───────────────
+  const handleSaveLocation = async () => {
+    if (!training || !locationForm.checkin_lat || !locationForm.checkin_lng) {
+      toast.error('Defina a localização primeiro.')
+      return
+    }
+    setSaving(true)
+    try {
+      await trainingsService.updateCheckinConfig(training.id, {
+        checkin_lat: parseFloat(locationForm.checkin_lat),
+        checkin_lng: parseFloat(locationForm.checkin_lng),
+        checkin_radius: parseInt(locationForm.checkin_radius) || 300,
+        checkin_start: locationForm.checkin_start,
+        checkin_end: locationForm.checkin_end,
+      })
+      toast.success('Configuração salva!')
+      setShowLocation(false)
+      load()
+    } catch { toast.error('Erro ao salvar configuração.') }
+    finally { setSaving(false) }
+  }
+
+  // ── Admin: criar treino ──────────────────────────────────
   const handleCreate = async () => {
     if (!form.date || !form.title) return
     setSaving(true)
     try {
       const sat = new Date(form.date + 'T12:00:00')
-      const wed = new Date('2020-01-01T00:00:00')  // já passou, lista sempre aberta
-      const close = new Date('2099-01-01T00:00:00')  // nunca fecha
+      const wed = new Date('2020-01-01T00:00:00')
+      const close = new Date('2099-01-01T00:00:00')
       await trainingsService.create({
-        title: form.title, date: form.date, location: form.location || undefined,
-        open_at: form.open_at || wed.toISOString(),
-        close_at: form.close_at || close.toISOString(),
+        title: form.title,
+        date: form.date,
+        location: form.location || undefined,
+        open_at: wed.toISOString(),
+        close_at: close.toISOString(),
       })
-      toast.success('Treino criado!'); setShowCreate(false); load()
+      toast.success('Treino criado!')
+      setShowCreate(false)
+      load()
     } catch { toast.error('Erro ao criar treino') }
     finally { setSaving(false) }
   }
 
-  const qrValue = training ? JSON.stringify({ type: 'mover_checkin', training_id: training.id }) : ''
-
-  if (loading) return <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}><Spinner dark /></div>
+  if (loading) return (
+    <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 60 }}>
+      <Spinner dark />
+    </div>
+  )
 
   return (
     <div className="page-content">
       <div className="page-header">
         <h1>Treino de Sábado</h1>
-        {isAdmin && <button className="btn-icon" onClick={() => setShowCreate(true)}><Plus size={18} /></button>}
+        {isAdmin && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            {training && (
+              <button className="btn-icon" style={{ background: 'var(--gray-200)' }}
+                onClick={() => setShowLocation(true)}>
+                <MapPin size={18} color="var(--orange)" />
+              </button>
+            )}
+            <button className="btn-icon" onClick={() => setShowCreate(true)}>
+              <Plus size={18} />
+            </button>
+          </div>
+        )}
       </div>
 
       {!training ? (
-        <EmptyState icon="📅" title="Nenhum treino agendado" sub={isAdmin ? 'Crie o próximo treino acima.' : 'O admin criará o próximo treino em breve.'} />
+        <EmptyState icon="📅" title="Nenhum treino agendado"
+          sub={isAdmin ? 'Crie o próximo treino acima.' : 'O admin criará o próximo treino em breve.'} />
       ) : (
         <>
-          {/* Training card */}
+          {/* Card do treino */}
           <div style={{ padding: 16, paddingBottom: 8 }}>
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
@@ -261,7 +258,14 @@ export default function TrainingPage() {
                   <div style={{ fontSize: 13, color: 'var(--orange)', fontWeight: 700, marginTop: 2, textTransform: 'capitalize' }}>
                     {new Date(training.date + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
                   </div>
-                  {training.location && <div style={{ fontSize: 12, color: 'var(--gray-500)', marginTop: 2 }}>📍 {training.location}</div>}
+                  {training.location && (
+                    <div style={{ fontSize: 12, color: 'var(--gray-500)', marginTop: 2 }}>📍 {training.location}</div>
+                  )}
+                  {training.checkin_lat && (
+                    <div style={{ fontSize: 12, color: 'var(--success)', marginTop: 2 }}>
+                      ✅ Check-in configurado · {training.checkin_start} às {training.checkin_end} · raio {training.checkin_radius}m
+                    </div>
+                  )}
                 </div>
                 <div style={{ background: 'var(--orange-faded)', borderRadius: 10, padding: '8px 12px', textAlign: 'center', flexShrink: 0 }}>
                   <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--orange)' }}>{interested.length}</div>
@@ -269,17 +273,32 @@ export default function TrainingPage() {
                 </div>
               </div>
 
+              {/* Check-in */}
               {myCheckIn ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#F0FFF4', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
                   <CheckCircle size={18} color="var(--success)" />
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--success)' }}>Check-in realizado!</span>
                 </div>
+              ) : training.checkin_lat ? (
+                // Usa canGeoCheckInTest para testes — troque por canGeoCheckIn em produção
+                canGeoCheckInTest ? (
+                  <button className="btn btn-secondary" style={{ marginBottom: 8 }}
+                    onClick={handleGeoCheckIn} disabled={checkingIn}>
+                    <Navigation size={16} />
+                    {checkingIn ? 'Verificando localização...' : 'Fazer Check-in por Localização'}
+                  </button>
+                ) : (
+                  <div style={{ background: 'var(--gray-100)', borderRadius: 8, padding: '10px', textAlign: 'center', fontSize: 12, color: 'var(--gray-500)', marginBottom: 8 }}>
+                    📍 Check-in disponível sábado das {training.checkin_start} às {training.checkin_end}
+                  </div>
+                )
               ) : (
-                <button className="btn btn-secondary" style={{ marginBottom: 8 }} onClick={() => setShowScanner(true)}>
-                  <ScanLine size={16} /> Fazer Check-in (QR Code)
-                </button>
+                <div style={{ background: 'var(--orange-faded)', borderRadius: 8, padding: '10px', textAlign: 'center', fontSize: 12, color: 'var(--orange)', marginBottom: 8 }}>
+                  {isAdmin ? '⚙️ Configure a localização do check-in tocando no ícone 📍 acima' : '⏳ Check-in será configurado pelo admin'}
+                </div>
               )}
 
+              {/* Lista de interesse */}
               {isListOpen ? (
                 <button className={`btn ${myInterest ? 'btn-ghost' : 'btn-primary'}`} onClick={handleToggle}>
                   {myInterest ? '✓ Estou na lista' : 'Quero ir neste sábado'}
@@ -290,12 +309,6 @@ export default function TrainingPage() {
                     ? `Lista abre ${new Date(training.open_at).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'short' })}`
                     : 'Lista encerrada'}
                 </div>
-              )}
-
-              {isAdmin && (
-                <button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={() => setShowQR(true)}>
-                  <QrCode size={16} /> Gerar QR de Check-in
-                </button>
               )}
             </div>
           </div>
@@ -314,52 +327,92 @@ export default function TrainingPage() {
             </div>
           </div>
 
-          {/* List */}
+          {/* Lista */}
           {(tab === 'interest' ? interested : checkIns).length === 0 ? (
             <div style={{ textAlign: 'center', color: 'var(--gray-400)', padding: '24px 0', fontSize: 14 }}>
               Nenhum registro ainda
             </div>
           ) : (
-            <div>
-              {(tab === 'interest' ? interested : checkIns).map(item => (
-                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '1px solid var(--gray-100)', background: 'white' }}>
-                  <Avatar name={item.user?.full_name || '?'} size={34} />
-                  <span style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>{item.user?.full_name}</span>
-                  {tab === 'checkin' && <CheckCircle size={16} color="var(--success)" />}
-                </div>
-              ))}
-            </div>
+            (tab === 'interest' ? interested : checkIns).map(item => (
+              <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderBottom: '1px solid var(--gray-100)', background: 'white' }}>
+                <Avatar name={item.user?.full_name || '?'} size={34} />
+                <span style={{ flex: 1, fontSize: 14, fontWeight: 500 }}>{item.user?.full_name}</span>
+                {tab === 'checkin' && <CheckCircle size={16} color="var(--success)" />}
+              </div>
+            ))
           )}
         </>
       )}
 
-      {/* QR Modal */}
-      {showQR && training && (
-        <Modal title="QR Code do Treino" onClose={() => setShowQR(false)}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '8px 0' }}>
-            <p style={{ fontSize: 13, color: 'var(--gray-500)', textAlign: 'center' }}>{training.title} — {new Date(training.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })}</p>
-            <QRDisplay value={qrValue} />
-            <p style={{ fontSize: 12, color: 'var(--gray-400)', textAlign: 'center', lineHeight: 1.5 }}>
-              Exiba este QR no celular para os membros escanearem e registrarem presença
-            </p>
+      {/* Modal configurar localização (admin) */}
+      {showLocation && training && (
+        <Modal title="Configurar Check-in" onClose={() => setShowLocation(false)}
+          footer={
+            <button className="btn btn-primary" onClick={handleSaveLocation} disabled={saving || !locationForm.checkin_lat}>
+              {saving ? <div className="spinner" /> : 'Salvar Configuração'}
+            </button>
+          }>
+          <div style={{ background: 'var(--orange-faded)', borderRadius: 10, padding: '10px 12px', fontSize: 13, color: 'var(--orange-dark)', marginBottom: 16, lineHeight: 1.5 }}>
+            ℹ️ Vá até o local do treino e toque em "Usar minha localização atual", ou insira as coordenadas manualmente.
+          </div>
+
+          <button className="btn btn-secondary" onClick={handleUseCurrentLocation} disabled={gettingLocation} style={{ marginBottom: 16 }}>
+            <Navigation size={16} />
+            {gettingLocation ? 'Obtendo localização...' : 'Usar minha localização atual'}
+          </button>
+
+          {locationForm.checkin_lat && (
+            <div style={{ background: 'var(--success-bg)', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: 'var(--success)', marginBottom: 16 }}>
+              📍 {parseFloat(locationForm.checkin_lat).toFixed(6)}, {parseFloat(locationForm.checkin_lng).toFixed(6)}
+            </div>
+          )}
+
+          <Input label="Latitude (opcional — preenchida automaticamente)"
+            value={locationForm.checkin_lat}
+            onChange={e => setLocationForm(f => ({ ...f, checkin_lat: e.target.value }))}
+            placeholder="-23.550520" />
+
+          <Input label="Longitude (opcional — preenchida automaticamente)"
+            value={locationForm.checkin_lng}
+            onChange={e => setLocationForm(f => ({ ...f, checkin_lng: e.target.value }))}
+            placeholder="-46.633308" />
+
+          <Input label="Raio de distância (metros)"
+            type="number" value={locationForm.checkin_radius}
+            onChange={e => setLocationForm(f => ({ ...f, checkin_radius: e.target.value }))}
+            placeholder="300" />
+
+          <div style={{ display: 'flex', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <Input label="Check-in abre às"
+                type="time" value={locationForm.checkin_start}
+                onChange={e => setLocationForm(f => ({ ...f, checkin_start: e.target.value }))} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <Input label="Check-in fecha às"
+                type="time" value={locationForm.checkin_end}
+                onChange={e => setLocationForm(f => ({ ...f, checkin_end: e.target.value }))} />
+            </div>
           </div>
         </Modal>
       )}
 
-      {/* Create training modal */}
+      {/* Modal criar treino */}
       {showCreate && (
         <Modal title="Criar Treino" onClose={() => setShowCreate(false)}
-          footer={<button className="btn btn-primary" onClick={handleCreate} disabled={saving || !form.date}>{saving ? <div className="spinner" /> : 'Criar Treino'}</button>}>
+          footer={
+            <button className="btn btn-primary" onClick={handleCreate} disabled={saving || !form.date}>
+              {saving ? <div className="spinner" /> : 'Criar Treino'}
+            </button>
+          }>
           <Input label="Título" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Treino Mover" />
           <Input label="Data *" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
-          <Input label="Local" value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} placeholder="Parque Ibirapuera — Portão 3" />
+          <Input label="Local" value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} placeholder="Orla do Guaíba — Em frente à pista de skate" />
           <div style={{ background: 'var(--orange-faded)', borderRadius: 10, padding: '10px 12px', fontSize: 12, color: 'var(--orange-dark)', lineHeight: 1.5 }}>
-            ℹ️ A lista abre automaticamente na quarta anterior e fecha no sábado às 7h.
+            ℹ️ Após criar o treino, configure a localização do check-in tocando no ícone 📍 no cabeçalho.
           </div>
         </Modal>
       )}
-
-      {showScanner && <QRScanner onScan={handleScan} onClose={() => setShowScanner(false)} />}
     </div>
   )
 }

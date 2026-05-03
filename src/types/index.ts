@@ -42,6 +42,11 @@ export interface Training {
   open_at: string
   close_at: string
   created_at: string
+  checkin_lat?: number
+  checkin_lng?: number
+  checkin_radius?: number
+  checkin_start?: string
+  checkin_end?: string
 }
 
 export interface TrainingInterest {

@@ -118,6 +118,19 @@ export const trainingsService = {
     await supabase.from('check_ins').insert({ training_id: trainingId, user_id: userId })
     return { alreadyCheckedIn: false }
   },
+async updateCheckinConfig(trainingId: string, config: {
+  checkin_lat: number
+  checkin_lng: number
+  checkin_radius: number
+  checkin_start: string
+  checkin_end: string
+}) {
+  const { error } = await supabase
+    .from('trainings')
+    .update(config)
+    .eq('id', trainingId)
+  if (error) throw error
+},
 }
 
 // ─── RIDES ───────────────────────────────────────────────────
