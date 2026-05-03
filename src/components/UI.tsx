@@ -101,12 +101,21 @@ export function Confirm({ message, onConfirm, onCancel, danger }: {
 }) {
   return (
     <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal-sheet" style={{ borderRadius: 24 }}>
+      <div
+        className="modal-sheet"
+        style={{ borderRadius: 24 }}
+        onClick={e => e.stopPropagation()}
+      >
         <div className="modal-body" style={{ padding: '24px 20px' }}>
           <p style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.5, textAlign: 'center' }}>{message}</p>
           <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
             <button className="btn btn-secondary" onClick={onCancel}>Cancelar</button>
-            <button className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`} onClick={onConfirm}>Confirmar</button>
+            <button
+              className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`}
+              onClick={e => { e.stopPropagation(); onConfirm(); }}
+            >
+              Confirmar
+            </button>
           </div>
         </div>
       </div>
