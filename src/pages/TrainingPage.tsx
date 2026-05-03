@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { QrCode, ScanLine, CheckCircle, Plus, Users, ClipboardList } from 'lucide-react'
-import { trainingsService } from '../services/api'
+import { QrCode, ScanLine, CheckCircle, Plus, Users, ClipboardList } from 'lucide-react'import { trainingsService } from '../services/api'
 import { useAuth } from '../hooks/useAuth'
 import { Avatar, Modal, Input, toast, EmptyState, Spinner } from '../components/UI'
 import type { Training, TrainingInterest, CheckIn } from '../types'
@@ -53,56 +52,57 @@ function QRDisplay({ value }: { value: string }) {
 
 // ── QR Scanner (uses device camera via MediaDevices API) ────────
 function QRScanner({ onScan, onClose }: { onScan: (data: string) => void; onClose: () => void }) {
-  const videoRef = useRef<HTMLVideoElement>(null)
+  const scannerRef = useRef<any>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    let stream: MediaStream | null = null
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-      .then(s => {
-        stream = s
-        if (videoRef.current) videoRef.current.srcObject = s
+    import('html5-qrcode').then(({ Html5Qrcode }) => {
+      const scanner = new Html5Qrcode('qr-reader')
+      scannerRef.current = scanner
+
+      scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        (decodedText) => {
+          scanner.stop().then(() => onScan(decodedText))
+        },
+        () => {}
+      ).catch(() => {
+        setError('Não foi possível acessar a câmera. Verifique as permissões.')
       })
-      .catch(() => setError('Não foi possível acessar a câmera. Verifique as permissões.'))
-
-    // Poll for QR using BarcodeDetector API (supported in modern Android Chrome)
-    let interval: ReturnType<typeof setInterval>
-    const detector = typeof (window as any).BarcodeDetector !== 'undefined'
-      ? new (window as any).BarcodeDetector({ formats: ['qr_code'] })
-      : null
-
-    if (detector && videoRef.current) {
-      interval = setInterval(async () => {
-        if (!videoRef.current) return
-        try {
-          const codes = await detector.detect(videoRef.current)
-          if (codes.length > 0) { onScan(codes[0].rawValue); clearInterval(interval) }
-        } catch { }
-      }, 500)
-    }
+    })
 
     return () => {
-      stream?.getTracks().forEach(t => t.stop())
-      clearInterval(interval)
+      scannerRef.current?.stop().catch(() => {})
     }
   }, [onScan])
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'black', zIndex: 60, display: 'flex', flexDirection: 'column' }}>
+    <div style={{
+      position: 'fixed', inset: 0,
+      background: 'black', zIndex: 60,
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center'
+    }}>
       {error ? (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', gap: 16, padding: 32 }}>
-          <div style={{ fontSize: 48 }}>📷</div>
-          <p style={{ textAlign: 'center', lineHeight: 1.5 }}>{error}</p>
-          <button className="btn btn-secondary" style={{ width: 'auto', padding: '10px 24px' }} onClick={onClose}>Fechar</button>
+        <div style={{ color: 'white', textAlign: 'center', padding: 32 }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>📷</div>
+          <p style={{ lineHeight: 1.5, marginBottom: 20 }}>{error}</p>
+          <button className="btn btn-secondary" style={{ width: 'auto' }} onClick={onClose}>Fechar</button>
         </div>
       ) : (
         <>
-          <video ref={videoRef} autoPlay playsInline style={{ flex: 1, objectFit: 'cover' }} />
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ width: 240, height: 240, border: '3px solid var(--orange)', borderRadius: 20 }} />
-            <p style={{ color: 'white', marginTop: 20, fontSize: 14, textAlign: 'center', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>Aponte para o QR Code do treino</p>
-          </div>
-          <button onClick={onClose} style={{ position: 'absolute', top: 48, right: 20, background: 'rgba(0,0,0,0.5)', border: 'none', color: 'white', width: 40, height: 40, borderRadius: '50%', fontSize: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+          <div id="qr-reader" style={{ width: 300, borderRadius: 12, overflow: 'hidden' }} />
+          <p style={{ color: 'white', marginTop: 20, fontSize: 14, textAlign: 'center', padding: '0 32px' }}>
+            Aponte para o QR Code do treino
+          </p>
+          <button onClick={onClose} style={{
+            marginTop: 24, background: 'rgba(255,255,255,0.2)',
+            border: 'none', color: 'white', padding: '10px 24px',
+            borderRadius: 999, cursor: 'pointer', fontSize: 14, fontWeight: 700
+          }}>
+            Cancelar
+          </button>
         </>
       )}
     </div>
