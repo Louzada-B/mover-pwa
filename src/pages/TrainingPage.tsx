@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { QrCode, ScanLine, CheckCircle, Plus, Users, ClipboardList } from 'lucide-react'import { trainingsService } from '../services/api'
+import { QrCode, ScanLine, CheckCircle, Plus, Users, ClipboardList } from 'lucide-react'
+import { trainingsService } from '../services/api'
 import { useAuth } from '../hooks/useAuth'
 import { Avatar, Modal, Input, toast, EmptyState, Spinner } from '../components/UI'
 import type { Training, TrainingInterest, CheckIn } from '../types'
