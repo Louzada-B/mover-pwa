@@ -105,10 +105,11 @@ function QRScanner({ onScan, onClose }: { onScan: (data: string) => void; onClos
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
             const jsQR = (await import('jsqr')).default
             const code = jsQR(imageData.data, imageData.width, imageData.height)
-            if (code) {
-              onScan(code.data)
-              return
-            }
+console.log('scanning...', code)
+if (code) {
+  onScan(code.data)
+  return
+}
           }
         } catch { }
       }
