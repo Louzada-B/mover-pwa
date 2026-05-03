@@ -169,8 +169,8 @@ export default function TrainingPage() {
     setSaving(true)
     try {
       const sat = new Date(form.date + 'T12:00:00')
-      const wed = new Date(sat); wed.setDate(sat.getDate() - 3)
-      const close = new Date(form.date + 'T07:00:00')
+      const wed = new Date(sat); wed.setDate(sat.getDate() - 6)
+      const close = new Date(form.date + 'T06:00:00')
       await trainingsService.create({
         title: form.title, date: form.date, location: form.location || undefined,
         open_at: form.open_at || wed.toISOString(),
