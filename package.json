@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "npx --yes vite build",
+    "build": "npx vite@5.2.13 build",
     "preview": "vite preview"
   },
   "dependencies": {
