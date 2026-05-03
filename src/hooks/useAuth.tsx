@@ -25,23 +25,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     load()
-    const { data: { subscription } } = authService.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN') load()
-      if (event === 'SIGNED_OUT') { setUser(null); setLoading(false) }
-    })
+    const { data: { subscription } } = authService.onAuthStateChange(
+      async (event, _session) => {
+        if (event === 'SIGNED_IN') await load()
+        if (event === 'SIGNED_OUT') {
+          setUser(null)
+          setLoading(false)
+        }
+      }
+    )
     return () => subscription.unsubscribe()
   }, [])
 
   return (
     <Ctx.Provider value={{
-      user, loading,
+      user,
+      loading,
       isAdmin: user?.role === 'admin',
       signIn: async (email, password) => {
         const { error } = await authService.signIn(email, password)
         if (error) throw error
         await load()
       },
-      signOut: async () => { await authService.signOut(); setUser(null) },
+      signOut: async () => {
+        await authService.signOut()
+        setUser(null)
+      },
       refresh: load,
     }}>
       {children}
