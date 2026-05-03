@@ -53,28 +53,74 @@ function QRDisplay({ value }: { value: string }) {
 
 // ── QR Scanner (uses device camera via MediaDevices API) ────────
 function QRScanner({ onScan, onClose }: { onScan: (data: string) => void; onClose: () => void }) {
-  const scannerRef = useRef<any>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
   const [error, setError] = useState('')
+  const [scanning, setScanning] = useState(false)
 
   useEffect(() => {
-    import('html5-qrcode').then(({ Html5Qrcode }) => {
-      const scanner = new Html5Qrcode('qr-reader')
-      scannerRef.current = scanner
+    let stream: MediaStream | null = null
+    let animationId: number
 
-      scanner.start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        (decodedText) => {
-          scanner.stop().then(() => onScan(decodedText))
-        },
-        () => {}
-      ).catch(() => {
-        setError('Não foi possível acessar a câmera. Verifique as permissões.')
-      })
-    })
+    const startCamera = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: 1280, height: 720 }
+        })
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          await videoRef.current.play()
+          setScanning(true)
+          scanFrame()
+        }
+      } catch {
+        setError('Não foi possível acessar a câmera. Verifique as permissões do navegador.')
+      }
+    }
+
+    const scanFrame = async () => {
+      if (!videoRef.current || videoRef.current.readyState < 2) {
+        animationId = requestAnimationFrame(scanFrame)
+        return
+      }
+
+      // Tenta BarcodeDetector (Chrome Android)
+      if ('BarcodeDetector' in window) {
+        try {
+          const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] })
+          const codes = await detector.detect(videoRef.current)
+          if (codes.length > 0) {
+            onScan(codes[0].rawValue)
+            return
+          }
+        } catch { }
+      } else {
+        // Fallback: canvas + jsQR
+        try {
+          const canvas = document.createElement('canvas')
+          canvas.width = videoRef.current.videoWidth
+          canvas.height = videoRef.current.videoHeight
+          const ctx = canvas.getContext('2d')
+          if (ctx && canvas.width > 0) {
+            ctx.drawImage(videoRef.current, 0, 0)
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+            const jsQR = (await import('jsqr')).default
+            const code = jsQR(imageData.data, imageData.width, imageData.height)
+            if (code) {
+              onScan(code.data)
+              return
+            }
+          }
+        } catch { }
+      }
+
+      animationId = requestAnimationFrame(scanFrame)
+    }
+
+    startCamera()
 
     return () => {
-      scannerRef.current?.stop().catch(() => {})
+      cancelAnimationFrame(animationId)
+      stream?.getTracks().forEach(t => t.stop())
     }
   }, [onScan])
 
@@ -93,14 +139,22 @@ function QRScanner({ onScan, onClose }: { onScan: (data: string) => void; onClos
         </div>
       ) : (
         <>
-          <div id="qr-reader" style={{ width: 300, borderRadius: 12, overflow: 'hidden' }} />
-          <p style={{ color: 'white', marginTop: 20, fontSize: 14, textAlign: 'center', padding: '0 32px' }}>
+          <video ref={videoRef} playsInline muted style={{ width: '100%', maxWidth: 400, borderRadius: 12 }} />
+          {scanning && (
+            <div style={{
+              position: 'absolute', width: 250, height: 250,
+              border: '3px solid var(--orange)', borderRadius: 20,
+              boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)'
+            }} />
+          )}
+          <p style={{ color: 'white', marginTop: 20, fontSize: 14, textAlign: 'center', padding: '0 32px', position: 'relative', zIndex: 1 }}>
             Aponte para o QR Code do treino
           </p>
           <button onClick={onClose} style={{
-            marginTop: 24, background: 'rgba(255,255,255,0.2)',
+            marginTop: 16, background: 'rgba(255,255,255,0.2)',
             border: 'none', color: 'white', padding: '10px 24px',
-            borderRadius: 999, cursor: 'pointer', fontSize: 14, fontWeight: 700
+            borderRadius: 999, cursor: 'pointer', fontSize: 14,
+            fontWeight: 700, position: 'relative', zIndex: 1
           }}>
             Cancelar
           </button>
