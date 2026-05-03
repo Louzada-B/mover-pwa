@@ -4,6 +4,7 @@ import { eventsService } from '../services/api'
 import { useAuth } from '../hooks/useAuth'
 import { Modal, Input, Textarea, toast, EmptyState, Confirm } from '../components/UI'
 import type { Event } from '../types'
+import { eventsService, trainingsService } from '../services/api'
 
 const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 const DAYS = ['D','S','T','Q','Q','S','S']
@@ -25,10 +26,27 @@ export default function CalendarPage() {
   const [saving, setSaving] = useState(false)
   const [deleteId, setDeleteId] = useState<string | null>(null)
 
-  const load = async () => {
-    try { setEvents(await eventsService.getAll()) }
-    catch { toast.error('Erro ao carregar eventos') }
-  }
+const load = async () => {
+  try {
+    const [evts, trainings] = await Promise.all([
+      eventsService.getAll(),
+      trainingsService.getAll(),
+    ])
+    // Converte treinos em eventos para exibir no calendário
+    const trainingEvents = trainings.map(t => ({
+      id: t.id,
+      title: t.title,
+      date: t.date,
+      time: '07:00',
+      location: t.location,
+      type: 'treino' as const,
+      description: `Check-in: ${t.checkin_start || '06:30'} às ${t.checkin_end || '10:00'}`,
+      created_by: '',
+      created_at: t.created_at,
+    }))
+    setEvents([...evts, ...trainingEvents])
+  } catch { toast.error('Erro ao carregar eventos') }
+}
   useEffect(() => { load() }, [])
 
   const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1) } else setMonth(m => m - 1) }
