@@ -72,16 +72,19 @@ function BottomNav({ isAdmin }: { isAdmin: boolean }) {
 function AppShell() {
   const { user, loading, isAdmin } = useAuth()
 
-  if (loading) {
-    return (
-      <div className="app-shell">
-        <div className="loading-screen">
-          <div style={{ fontSize: 48 }}>🏃</div>
-          <div className="loading-brand">MOVER</div>
+if (loading) {
+  return (
+    <div className="app-shell">
+      <div className="loading-screen">
+        <div style={{ fontSize: 48 }}>🏃</div>
+        <div className="loading-brand">MOVER</div>
+        <div style={{ marginTop: 24 }}>
+          <div className="spinner" style={{ width: 24, height: 24, borderColor: 'rgba(255,255,255,0.3)', borderTopColor: 'white' }} />
         </div>
       </div>
-    )
-  }
+    </div>
+  )
+}
 
   if (!user) {
     return (

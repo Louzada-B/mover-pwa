@@ -23,19 +23,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false)
   }
 
-  useEffect(() => {
-    load()
-    const { data: { subscription } } = authService.onAuthStateChange(
-      async (event, _session) => {
-        if (event === 'SIGNED_IN') await load()
-        if (event === 'SIGNED_OUT') {
-          setUser(null)
-          setLoading(false)
-        }
+useEffect(() => {
+  // Timeout de segurança — se demorar mais de 5s, libera a tela
+  const timeout = setTimeout(() => {
+    setLoading(false)
+  }, 5000)
+
+  load().finally(() => clearTimeout(timeout))
+
+  const { data: { subscription } } = authService.onAuthStateChange(
+    async (event, _session) => {
+      if (event === 'SIGNED_IN') await load()
+      if (event === 'SIGNED_OUT') {
+        setUser(null)
+        setLoading(false)
       }
-    )
-    return () => subscription.unsubscribe()
-  }, [])
+    }
+  )
+  return () => {
+    subscription.unsubscribe()
+    clearTimeout(timeout)
+  }
+}, [])
 
   return (
     <Ctx.Provider value={{
